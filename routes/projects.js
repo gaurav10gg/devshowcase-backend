@@ -144,5 +144,33 @@ router.delete("/:id/like", requireAuth, async (req, res) => {
   const stats = await getProjectStats(projectId, req.user.id);
   res.json(stats);
 });
+/* ========================================
+   GET SINGLE PROJECT BY ID
+======================================== */
+router.get("/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT 
+        p.*,
+        COALESCE((SELECT COUNT(*) FROM votes v WHERE v.project_id = p.id), 0) AS likes,
+        (SELECT COUNT(*) FROM comments c WHERE c.project_id = p.id) AS comments_count
+      FROM projects p
+      WHERE p.id = $1
+      `,
+      [id]
+    );
+
+    if (result.rows.length === 0)
+      return res.status(404).json({ message: "Project not found" });
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("GET /projects/:id error:", err);
+    res.status(500).json({ message: "Failed to load project" });
+  }
+});
 
 export default router;
