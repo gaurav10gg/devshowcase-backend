@@ -31,19 +31,32 @@ async function getProjectStats(projectId, userId) {
 /* ========================================
    CREATE NEW PROJECT
 ======================================== */
+/* ========================================
+   CREATE NEW PROJECT
+======================================== */
 router.post("/", requireAuth, async (req, res) => {
-  const { title, short_desc, full_desc, image, github, live } = req.body;
+  const { title, short_desc, full_desc, image, github, live, tags } = req.body;
 
   if (!title) return res.status(400).json({ message: "Title required" });
 
   try {
     const result = await pool.query(
       `
-        INSERT INTO projects (title, short_desc, full_desc, image, github, live, user_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO projects 
+        (title, short_desc, full_desc, image, github, live, tags, user_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING *
       `,
-      [title, short_desc, full_desc, image, github, live, req.user.id] // TEXT user_id
+      [
+        title,
+        short_desc,
+        full_desc,
+        image,
+        github,
+        live,
+        tags || [],     // ⭐ ensures tags is array
+        req.user.id
+      ]
     );
 
     res.json(result.rows[0]);
