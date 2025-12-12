@@ -1,7 +1,6 @@
 import express from "express";
 import { pool } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
-import {requireAuthOptional} from "../middleware/requireAuthOptional.js";
 
 const router = express.Router();
 
@@ -162,33 +161,24 @@ router.delete("/:id/like", requireAuth, async (req, res) => {
 /* ========================================
    GET SINGLE PROJECT BY ID
 ======================================== */
-router.get("/:id", requireAuthOptional, async (req, res) => {
+router.get("/:id", async (req, res) => {
   const { id } = req.params;
-  const userId = req.user?.id || null;
 
   try {
     const result = await pool.query(
       `
-      SELECT
+      SELECT 
         p.*,
         COALESCE((SELECT COUNT(*) FROM votes v WHERE v.project_id = p.id), 0) AS likes,
-        (SELECT COUNT(*) FROM comments c WHERE c.project_id = p.id) AS comments_count,
-        (
-          SELECT EXISTS(
-            SELECT 1 FROM votes 
-            WHERE project_id = p.id AND user_id = p2.user_id
-          )
-        ) AS liked
+        (SELECT COUNT(*) FROM comments c WHERE c.project_id = p.id) AS comments_count
       FROM projects p
-      LEFT JOIN LATERAL (SELECT $2 AS user_id) p2 ON TRUE
       WHERE p.id = $1
       `,
-      [id, userId]
+      [id]
     );
 
-    if (!result.rows.length) {
+    if (result.rows.length === 0)
       return res.status(404).json({ message: "Project not found" });
-    }
 
     res.json(result.rows[0]);
   } catch (err) {
@@ -196,6 +186,5 @@ router.get("/:id", requireAuthOptional, async (req, res) => {
     res.status(500).json({ message: "Failed to load project" });
   }
 });
-
 
 export default router;
