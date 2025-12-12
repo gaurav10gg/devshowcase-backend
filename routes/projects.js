@@ -169,25 +169,26 @@ router.get("/:id", requireAuthOptional, async (req, res) => {
   try {
     const result = await pool.query(
       `
-      SELECT 
+      SELECT
         p.*,
         COALESCE((SELECT COUNT(*) FROM votes v WHERE v.project_id = p.id), 0) AS likes,
         (SELECT COUNT(*) FROM comments c WHERE c.project_id = p.id) AS comments_count,
-        CASE 
-          WHEN $2 IS NULL THEN false
-          ELSE EXISTS (
+        (
+          SELECT EXISTS(
             SELECT 1 FROM votes 
-            WHERE user_id = $2::uuid AND project_id = p.id
+            WHERE project_id = p.id AND user_id = p2.user_id
           )
-        END AS liked
+        ) AS liked
       FROM projects p
+      LEFT JOIN LATERAL (SELECT $2 AS user_id) p2 ON TRUE
       WHERE p.id = $1
       `,
       [id, userId]
     );
 
-    if (!result.rows.length)
+    if (!result.rows.length) {
       return res.status(404).json({ message: "Project not found" });
+    }
 
     res.json(result.rows[0]);
   } catch (err) {
@@ -195,5 +196,6 @@ router.get("/:id", requireAuthOptional, async (req, res) => {
     res.status(500).json({ message: "Failed to load project" });
   }
 });
+
 
 export default router;
