@@ -161,7 +161,7 @@ router.delete("/:id/like", requireAuth, async (req, res) => {
 /* ========================================
    GET SINGLE PROJECT BY ID
 ======================================== */
-router.get("/:id", async (req, res) => {
+router.get("/:id", requireAuthOptional, async (req, res) => {
   const { id } = req.params;
   const userId = req.user?.id || null;
 
@@ -172,18 +172,20 @@ router.get("/:id", async (req, res) => {
         p.*,
         COALESCE((SELECT COUNT(*) FROM votes v WHERE v.project_id = p.id), 0) AS likes,
         (SELECT COUNT(*) FROM comments c WHERE c.project_id = p.id) AS comments_count,
-        EXISTS (
-          SELECT 1 FROM votes 
-          WHERE votes.project_id = p.id 
-          AND votes.user_id = $2::uuid
-        ) AS liked
+        CASE 
+          WHEN $2::uuid IS NULL THEN false
+          ELSE EXISTS (
+            SELECT 1 FROM votes 
+            WHERE user_id = $2::uuid AND project_id = p.id
+          )
+        END AS liked
       FROM projects p
       WHERE p.id = $1
       `,
       [id, userId]
     );
 
-    if (result.rows.length === 0)
+    if (!result.rows.length)
       return res.status(404).json({ message: "Project not found" });
 
     res.json(result.rows[0]);
