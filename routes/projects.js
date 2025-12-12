@@ -158,6 +158,7 @@ router.delete("/:id/like", requireAuth, async (req, res) => {
   const stats = await getProjectStats(projectId, req.user.id);
   res.json(stats);
 });
+
 /* ========================================
    GET SINGLE PROJECT BY ID
 ======================================== */
@@ -248,6 +249,47 @@ router.patch("/:id", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("Update project error:", err);
     res.status(500).json({ message: "Failed to update project" });
+  }
+});
+
+/* ========================================
+   DELETE PROJECT (SAFE DELETE)
+======================================== */
+router.delete("/:id", requireAuth, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // delete votes FIRST (foreign key constraint)
+    await pool.query(
+      "DELETE FROM votes WHERE project_id = $1",
+      [id]
+    );
+
+    // delete comments FIRST (if you have comments table)
+    await pool.query(
+      "DELETE FROM comments WHERE project_id = $1",
+      [id]
+    );
+
+    // now delete the project
+    const result = await pool.query(
+      `
+      DELETE FROM projects
+      WHERE id = $1 AND user_id = $2
+      RETURNING *
+      `,
+      [id, req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(403).json({ message: "Not allowed to delete" });
+    }
+
+    res.json({ message: "Project deleted" });
+
+  } catch (err) {
+    console.error("Delete project error:", err);
+    res.status(500).json({ message: "Failed to delete project" });
   }
 });
 
