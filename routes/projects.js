@@ -174,7 +174,7 @@ router.get("/:id", requireAuthOptional, async (req, res) => {
         COALESCE((SELECT COUNT(*) FROM votes v WHERE v.project_id = p.id), 0) AS likes,
         (SELECT COUNT(*) FROM comments c WHERE c.project_id = p.id) AS comments_count,
         CASE 
-          WHEN $2::uuid IS NULL THEN false
+          WHEN $2 IS NULL THEN false
           ELSE EXISTS (
             SELECT 1 FROM votes 
             WHERE user_id = $2::uuid AND project_id = p.id
