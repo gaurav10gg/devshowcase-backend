@@ -187,4 +187,68 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+/* ========================================
+   UPDATE PROJECT (SAFE PATCH)
+======================================== */
+router.patch("/:id", requireAuth, async (req, res) => {
+  const { id } = req.params;
+
+  let {
+    title = "",
+    short_desc = "",
+    full_desc = "",
+    image = "",
+    github = "",
+    live = "",
+    tags = [],
+  } = req.body;
+
+  try {
+    // Ensure tags is always an array
+    if (!Array.isArray(tags)) {
+      tags = [];
+    }
+
+    // Ensure required fields
+    if (!title.trim()) return res.status(400).json({ message: "Title required" });
+    if (!short_desc.trim()) return res.status(400).json({ message: "Short description required" });
+
+    const result = await pool.query(
+      `
+      UPDATE projects
+      SET 
+        title = $1,
+        short_desc = $2,
+        full_desc = $3,
+        image = $4,
+        github = $5,
+        live = $6,
+        tags = $7
+      WHERE id = $8 AND user_id = $9
+      RETURNING *
+      `,
+      [
+        title,
+        short_desc,
+        full_desc,
+        image,
+        github,
+        live,
+        tags,
+        id,
+        req.user.id,
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(403).json({ message: "Not allowed to edit" });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("Update project error:", err);
+    res.status(500).json({ message: "Failed to update project" });
+  }
+});
+
 export default router;
