@@ -163,6 +163,7 @@ router.delete("/:id/like", requireAuth, async (req, res) => {
 ======================================== */
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
+  const userId = req.user?.id || null;
 
   try {
     const result = await pool.query(
@@ -170,11 +171,16 @@ router.get("/:id", async (req, res) => {
       SELECT 
         p.*,
         COALESCE((SELECT COUNT(*) FROM votes v WHERE v.project_id = p.id), 0) AS likes,
-        (SELECT COUNT(*) FROM comments c WHERE c.project_id = p.id) AS comments_count
+        (SELECT COUNT(*) FROM comments c WHERE c.project_id = p.id) AS comments_count,
+        EXISTS (
+          SELECT 1 FROM votes 
+          WHERE votes.project_id = p.id 
+          AND votes.user_id = $2::uuid
+        ) AS liked
       FROM projects p
       WHERE p.id = $1
       `,
-      [id]
+      [id, userId]
     );
 
     if (result.rows.length === 0)
