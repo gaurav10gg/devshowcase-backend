@@ -1,6 +1,7 @@
 import express from "express";
 import { pool } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
+import { requireAuthOptional } from "../middleware/requireAuthOptional.js";
 
 const router = express.Router();
 
@@ -31,9 +32,6 @@ async function getProjectStats(projectId, userId) {
 /* ========================================
    CREATE NEW PROJECT
 ======================================== */
-/* ========================================
-   CREATE NEW PROJECT
-======================================== */
 router.post("/", requireAuth, async (req, res) => {
   const { title, short_desc, full_desc, image, github, live, tags } = req.body;
 
@@ -54,7 +52,7 @@ router.post("/", requireAuth, async (req, res) => {
         image,
         github,
         live,
-        tags || [],     // ⭐ ensures tags is array
+        tags || [],
         req.user.id
       ]
     );
@@ -67,21 +65,54 @@ router.post("/", requireAuth, async (req, res) => {
 });
 
 /* ========================================
-   GET ALL PROJECTS (NO PARAMS)
+   GET ALL PROJECTS (WITH OPTIONAL AUTH)
+   ⭐ FIXED: Now properly returns liked status
 ======================================== */
-router.get("/", async (req, res) => {
+router.get("/", requireAuthOptional, async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT
-        p.*,
-        COALESCE(COUNT(v.project_id), 0) AS likes,
-        (SELECT COUNT(*) FROM comments c WHERE c.project_id = p.id) AS comments_count,
-        false AS liked
-      FROM projects p
-      LEFT JOIN votes v ON p.id = v.project_id
-      GROUP BY p.id
-      ORDER BY p.created_at DESC
-    `);
+    const userId = req.user?.id || null;
+
+    let query;
+    let params;
+
+    if (userId) {
+      // User is logged in - check liked status
+      query = `
+        SELECT
+          p.*,
+          COALESCE(COUNT(DISTINCT v.user_id), 0) AS likes,
+          COALESCE(COUNT(DISTINCT c.id), 0) AS comments_count,
+          EXISTS (
+            SELECT 1 
+            FROM votes 
+            WHERE votes.user_id = $1::uuid 
+              AND votes.project_id = p.id
+          ) AS liked
+        FROM projects p
+        LEFT JOIN votes v ON p.id = v.project_id
+        LEFT JOIN comments c ON p.id = c.project_id
+        GROUP BY p.id
+        ORDER BY p.created_at DESC
+      `;
+      params = [userId];
+    } else {
+      // User not logged in - liked = false
+      query = `
+        SELECT
+          p.*,
+          COALESCE(COUNT(DISTINCT v.user_id), 0) AS likes,
+          COALESCE(COUNT(DISTINCT c.id), 0) AS comments_count,
+          false AS liked
+        FROM projects p
+        LEFT JOIN votes v ON p.id = v.project_id
+        LEFT JOIN comments c ON p.id = c.project_id
+        GROUP BY p.id
+        ORDER BY p.created_at DESC
+      `;
+      params = [];
+    }
+
+    const result = await pool.query(query, params);
 
     res.json(result.rows);
   } catch (err) {
@@ -99,8 +130,8 @@ router.get("/me", requireAuth, async (req, res) => {
       `
       SELECT 
         p.*,
-        COALESCE(COUNT(v.project_id), 0) AS likes,
-        (SELECT COUNT(*) FROM comments c WHERE c.project_id = p.id) AS comments_count,
+        COALESCE(COUNT(DISTINCT v.user_id), 0) AS likes,
+        COALESCE(COUNT(DISTINCT c.id), 0) AS comments_count,
         EXISTS (
           SELECT 1 
           FROM votes 
@@ -109,11 +140,12 @@ router.get("/me", requireAuth, async (req, res) => {
         ) AS liked
       FROM projects p
       LEFT JOIN votes v ON p.id = v.project_id
-      WHERE p.user_id = $1::text        -- 🔥 FIXED TEXT CAST 🔥
+      LEFT JOIN comments c ON p.id = c.project_id
+      WHERE p.user_id = $1::text
       GROUP BY p.id
       ORDER BY p.created_at DESC
       `,
-      [req.user.id]  // still UUID from Supabase
+      [req.user.id]
     );
 
     res.json(result.rows);
@@ -123,60 +155,96 @@ router.get("/me", requireAuth, async (req, res) => {
   }
 });
 
-
-
 /* ========================================
    LIKE PROJECT
+   ⭐ FIXED: Returns updated stats after like
 ======================================== */
 router.post("/:id/like", requireAuth, async (req, res) => {
   const projectId = req.params.id;
 
-  await pool.query(
-    `
-    INSERT INTO votes (user_id, project_id)
-    VALUES ($1::uuid, $2::integer)
-    ON CONFLICT (user_id, project_id) DO NOTHING
-  `,
-    [req.user.id, projectId]
-  );
+  try {
+    await pool.query(
+      `
+      INSERT INTO votes (user_id, project_id)
+      VALUES ($1::uuid, $2::integer)
+      ON CONFLICT (user_id, project_id) DO NOTHING
+      `,
+      [req.user.id, projectId]
+    );
 
-  const stats = await getProjectStats(projectId, req.user.id);
-  res.json(stats);
+    const stats = await getProjectStats(projectId, req.user.id);
+    res.json(stats);
+  } catch (err) {
+    console.error("Like project error:", err);
+    res.status(500).json({ message: "Failed to like project" });
+  }
 });
 
 /* ========================================
    UNLIKE PROJECT
+   ⭐ FIXED: Returns updated stats after unlike
 ======================================== */
 router.delete("/:id/like", requireAuth, async (req, res) => {
   const projectId = req.params.id;
 
-  await pool.query(
-    "DELETE FROM votes WHERE user_id = $1::uuid AND project_id = $2::integer",
-    [req.user.id, projectId]
-  );
+  try {
+    await pool.query(
+      "DELETE FROM votes WHERE user_id = $1::uuid AND project_id = $2::integer",
+      [req.user.id, projectId]
+    );
 
-  const stats = await getProjectStats(projectId, req.user.id);
-  res.json(stats);
+    const stats = await getProjectStats(projectId, req.user.id);
+    res.json(stats);
+  } catch (err) {
+    console.error("Unlike project error:", err);
+    res.status(500).json({ message: "Failed to unlike project" });
+  }
 });
 
 /* ========================================
    GET SINGLE PROJECT BY ID
+   ⭐ FIXED: Now checks if user has liked
 ======================================== */
-router.get("/:id", async (req, res) => {
+router.get("/:id", requireAuthOptional, async (req, res) => {
   const { id } = req.params;
+  const userId = req.user?.id || null;
 
   try {
-    const result = await pool.query(
-      `
-      SELECT 
-        p.*,
-        COALESCE((SELECT COUNT(*) FROM votes v WHERE v.project_id = p.id), 0) AS likes,
-        (SELECT COUNT(*) FROM comments c WHERE c.project_id = p.id) AS comments_count
-      FROM projects p
-      WHERE p.id = $1
-      `,
-      [id]
-    );
+    let query;
+    let params;
+
+    if (userId) {
+      // User logged in - check liked status
+      query = `
+        SELECT 
+          p.*,
+          COALESCE((SELECT COUNT(*) FROM votes v WHERE v.project_id = p.id), 0) AS likes,
+          COALESCE((SELECT COUNT(*) FROM comments c WHERE c.project_id = p.id), 0) AS comments_count,
+          EXISTS (
+            SELECT 1 
+            FROM votes 
+            WHERE votes.user_id = $2::uuid 
+              AND votes.project_id = p.id
+          ) AS liked
+        FROM projects p
+        WHERE p.id = $1
+      `;
+      params = [id, userId];
+    } else {
+      // User not logged in
+      query = `
+        SELECT 
+          p.*,
+          COALESCE((SELECT COUNT(*) FROM votes v WHERE v.project_id = p.id), 0) AS likes,
+          COALESCE((SELECT COUNT(*) FROM comments c WHERE c.project_id = p.id), 0) AS comments_count,
+          false AS liked
+        FROM projects p
+        WHERE p.id = $1
+      `;
+      params = [id];
+    }
+
+    const result = await pool.query(query, params);
 
     if (result.rows.length === 0)
       return res.status(404).json({ message: "Project not found" });
@@ -205,12 +273,10 @@ router.patch("/:id", requireAuth, async (req, res) => {
   } = req.body;
 
   try {
-    // Ensure tags is always an array
     if (!Array.isArray(tags)) {
       tags = [];
     }
 
-    // Ensure required fields
     if (!title.trim()) return res.status(400).json({ message: "Title required" });
     if (!short_desc.trim()) return res.status(400).json({ message: "Short description required" });
 
@@ -259,19 +325,9 @@ router.delete("/:id", requireAuth, async (req, res) => {
   const { id } = req.params;
 
   try {
-    // delete votes FIRST (foreign key constraint)
-    await pool.query(
-      "DELETE FROM votes WHERE project_id = $1",
-      [id]
-    );
+    await pool.query("DELETE FROM votes WHERE project_id = $1", [id]);
+    await pool.query("DELETE FROM comments WHERE project_id = $1", [id]);
 
-    // delete comments FIRST (if you have comments table)
-    await pool.query(
-      "DELETE FROM comments WHERE project_id = $1",
-      [id]
-    );
-
-    // now delete the project
     const result = await pool.query(
       `
       DELETE FROM projects
