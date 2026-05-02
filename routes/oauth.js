@@ -5,44 +5,35 @@ import crypto from "crypto";
 
 const router = express.Router();
 
-// store codes temporarily in memory (fine for now)
-const authCodes = new Map(); // code → { user_id, expires_at }
+const authCodes = new Map();
 
 // ─── 1. AUTHORIZE ─────────────────────────────────────────
-// ChatGPT redirects user here
 router.get("/authorize", (req, res) => {
   const { redirect_uri, state } = req.query;
 
-  // store redirect_uri + state in the URL to pass through login
   const params = new URLSearchParams({ redirect_uri, state });
   
-  // send user to your frontend connect page
   res.redirect(
     `${process.env.FRONTEND_URL}/oauth-connect?${params.toString()}`
   );
 });
 
 // ─── 2. CALLBACK ──────────────────────────────────────────
-// Your frontend calls this after user logs in
-// exchanges supabase token → auth code
 router.post("/callback", async (req, res) => {
   const { access_token, redirect_uri, state } = req.body;
 
-  // verify supabase token
   const { data, error } = await supabase.auth.getUser(access_token);
   if (error || !data?.user) {
     return res.status(401).json({ error: "Invalid token" });
   }
 
-  // generate a short-lived auth code
   const code = crypto.randomUUID();
   authCodes.set(code, {
     user_id: data.user.id,
     access_token,
-    expires_at: Date.now() + 5 * 60 * 1000, // 5 mins
+    expires_at: Date.now() + 5 * 60 * 1000,
   });
 
-  // redirect back to ChatGPT with code + state
   const redirectUrl = new URL(redirect_uri);
   redirectUrl.searchParams.set("code", code);
   redirectUrl.searchParams.set("state", state);
@@ -51,9 +42,16 @@ router.post("/callback", async (req, res) => {
 });
 
 // ─── 3. TOKEN ─────────────────────────────────────────────
-// ChatGPT calls this to exchange code for access_token
 router.post("/token", (req, res) => {
-  const { code } = req.body;
+  const { code, client_id, client_secret } = req.body;
+
+  // Validate client credentials
+  if (
+    client_id !== process.env.CLIENT_ID ||
+    client_secret !== process.env.CLIENT_SECRET
+  ) {
+    return res.status(401).json({ error: "Invalid client credentials" });
+  }
 
   const entry = authCodes.get(code);
 
@@ -62,7 +60,7 @@ router.post("/token", (req, res) => {
     return res.status(401).json({ error: "Invalid or expired code" });
   }
 
-  authCodes.delete(code); // one-time use
+  authCodes.delete(code);
 
   res.json({
     access_token: entry.access_token,
