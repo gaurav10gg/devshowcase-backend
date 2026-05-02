@@ -43,9 +43,22 @@ router.post("/callback", async (req, res) => {
 
 // ─── 3. TOKEN ─────────────────────────────────────────────
 router.post("/token", (req, res) => {
-  const { code, client_id, client_secret } = req.body;
+  // ChatGPT can send via body OR Basic Auth header
+  let client_id = req.body.client_id;
+  let client_secret = req.body.client_secret;
 
-  // Validate client credentials
+  // Check Basic Auth header as fallback
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Basic ")) {
+    const decoded = Buffer.from(authHeader.slice(6), "base64").toString();
+    [client_id, client_secret] = decoded.split(":");
+  }
+
+  console.log("client_id received:", client_id);
+  console.log("client_secret received:", client_secret);
+  console.log("expected client_id:", process.env.CLIENT_ID);
+  console.log("expected client_secret:", process.env.CLIENT_SECRET);
+
   if (
     client_id !== process.env.CLIENT_ID ||
     client_secret !== process.env.CLIENT_SECRET
@@ -53,6 +66,7 @@ router.post("/token", (req, res) => {
     return res.status(401).json({ error: "Invalid client credentials" });
   }
 
+  const { code } = req.body;
   const entry = authCodes.get(code);
 
   if (!entry || Date.now() > entry.expires_at) {
