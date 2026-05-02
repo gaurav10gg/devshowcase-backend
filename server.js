@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-
+import gptRoutes from "./routes/gpt.js";
 dotenv.config();
 
 const app = express();
@@ -15,8 +15,11 @@ import userRoutes from "./routes/users.js";
 import projectRoutes from "./routes/projects.js";
 import commentRoutes from "./routes/comments.js";
 import uploadRoutes from "./routes/upload.js";
+import oauthRoutes from "./routes/oauth.js";
+app.use("/oauth", oauthRoutes);
 
 app.use("/api/users", userRoutes);
+app.use("/api/gpt", gptRoutes);
 app.use("/api/projects", projectRoutes);
 app.use("/api/comments", commentRoutes);
 app.use("/api/upload", uploadRoutes);
