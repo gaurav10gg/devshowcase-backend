@@ -16,6 +16,8 @@ import projectRoutes from "./routes/projects.js";
 import commentRoutes from "./routes/comments.js";
 import uploadRoutes from "./routes/upload.js";
 import oauthRoutes from "./routes/oauth.js";
+app.use(express.urlencoded({ extended: true })); // ⭐ add this
+app.use(express.json());
 app.use("/oauth", oauthRoutes);
 
 app.use("/api/users", userRoutes);

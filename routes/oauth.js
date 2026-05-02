@@ -46,8 +46,13 @@ router.post("/token", (req, res) => {
     [client_id, client_secret] = decoded.split(":");
   }
 
-  console.log("client_id received:", client_id);
-  console.log("client_secret received:", client_secret);
+  // ⭐ Check body, query params, all possible locations
+  const code = req.body.code || req.query.code || req.params.code;
+
+  console.log("full body:", req.body);
+  console.log("full query:", req.query);
+  console.log("code received:", code);
+  console.log("all stored codes:", [...authCodes.keys()]);
 
   if (
     client_id !== process.env.CLIENT_ID ||
@@ -56,15 +61,7 @@ router.post("/token", (req, res) => {
     return res.status(401).json({ error: "Invalid client credentials" });
   }
 
-  const { code } = req.body;
-
-  console.log("code received:", code);
-  console.log("all stored codes:", [...authCodes.keys()]);
-
   const entry = authCodes.get(code);
-
-  console.log("entry found:", entry);
-  console.log("expired?", entry ? Date.now() > entry.expires_at : "no entry");
 
   if (!entry || Date.now() > entry.expires_at) {
     authCodes.delete(code);
